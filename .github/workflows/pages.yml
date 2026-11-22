@@ -1,0 +1,62 @@
+# Verificação (todo push e pull request) e publicação no GitHub Pages.
+#
+# A publicação só roda em push no master com o repositório PÚBLICO: enquanto o
+# repositório for privado, este workflow apenas verifica o código (P1.5/P2.1).
+# Ver docs/decisions.md, D20.
+name: Verificar e publicar
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Uma publicação por vez; não cancela uma já em andamento.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Typecheck, lint, testes e build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # Vite 8 exige Node 20.19+ ou 22.12+; usamos o 24 (LTS), o mesmo do desenvolvimento.
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+      - name: Guardar o site pronto (dist/) para publicação
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    name: Publicar no GitHub Pages
+    needs: verify
+    # Só publica a partir do master e com o repositório público.
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request' && github.event.repository.private == false
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v6
+      - id: deployment
+        uses: actions/deploy-pages@v5

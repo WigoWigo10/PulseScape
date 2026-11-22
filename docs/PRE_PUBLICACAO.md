@@ -200,9 +200,12 @@ npm run preview
 | Baseline | `cd2c88f` | typecheck, lint, 79/79 testes, build OK | Node 24.11.1; `npm ci` não executado (evita quebrar o `npm run dev` aberto no Windows) |
 | P0.1 | confirmado | corrigido e validado | decodificação a 8 kHz, limites 80 MB/15 min, uma decodificação por vez (D17) |
 | P0.2 | confirmado | corrigido e validado | `VisualizationHost` com redesenho e fallback com aviso (D18) |
-| P0.3 | parcial | 2 defeitos corrigidos | falha parcial do Web Audio: contexto órfão a cada play e áudio mudo (D17); jornada completa ainda a percorrer |
+| P0.3 | confirmado (2 defeitos) | corrigido e validado | falha parcial do Web Audio: contexto órfão a cada play e áudio mudo (D17). Jornada instrumentada (seletor real + arrastar): cancelar, mesmo arquivo 2×, play, volume, busca até o fim, tocar de novo, pausa, vazio, não-áudio, corrompido e recuperação, troca em loading/playing, 18 trocas de preset, recarga — todos OK; 7 URLs criadas/6 revogadas (1 viva = faixa atual), **1 `AudioContext`** na sessão, **≤ 1 callback de rAF por quadro**, 0 erros no console. **Não verificado:** segundo plano (o Chromium automatizado manteve a aba “visible”) — testar no celular |
 | P0.4 | parcial (emulado) | layout corrigido | seletor vazando, alvos de toque pequenos (D19); **requer teste no Galaxy A54** |
 | P1.1 | parcial | aviso visível no fallback 3D | seletor ainda mostra o modo 3D escolhido enquanto exibe o Anel; perda/restauração de contexto não exercitada |
+
+| P1.5 | — | workflow criado | `.github/workflows/pages.yml`: verificação em push/PR com Node 24; README com Node 20.19+/22.12+ (D20). Execução no GitHub ainda não observada (depende de push) |
+| P2.1 | — | preparado, **não publicado** | `base: '/PulseScape/'`; deploy só com repositório público; `build` + `preview` sem 404, chunk da Esfera sob demanda, console limpo (D20) |
 
 Após a sessão: typecheck, lint, **88/88 testes** (+9 de `trackAnalysis`) e build OK.
 

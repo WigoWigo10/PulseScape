@@ -189,6 +189,14 @@ Auditoria emulada (Chromium com `isMobile`, toque e DPR 2,625) em 412×915, 360�
 
 Resultado: zero rolagem horizontal e vertical nas quatro telas; todos os controles ≥ 40 px. **Não substitui** o teste no Galaxy A54 (seletor de arquivos do Android, GPU, bloqueio de tela).
 
+## D20 — GitHub Pages e CI (2026-11-22, P2.1/P1.5)
+
+**Destino escolhido pelo responsável:** opção 1 — tornar o repositório público e publicar pelo GitHub Pages em `https://wigowigo10.github.io/PulseScape/` (o plano da conta não pôde ser confirmado via API; Pages a partir de repositório privado não foi presumido). Antes, o histórico foi reescrito com o e-mail *noreply* do GitHub (o e-mail pessoal estava nos 2 commits) e o projeto configurado para usá-lo.
+
+- `vite.config.ts`: `base: '/PulseScape/'` (também em desenvolvimento, para não haver diferença de caminhos entre dev e produção).
+- `.github/workflows/pages.yml`: job `verify` (Node 24, `npm ci`, typecheck, lint, test, build; falhas encerram com erro) em todo push/PR; job `deploy` (`configure-pages@v6`, `deploy-pages@v5`, permissões mínimas `pages: write`/`id-token: write`) **condicionado a `github.event.repository.private == false`** e ao `master` — com o repositório privado o workflow só verifica. Versões das actions conferidas nas releases oficiais (checkout v7, setup-node v7, upload-pages-artifact v5).
+- Verificado com `npm run build` + `npm run preview` em `/PulseScape/`: `dist/` contém só `index.html`, `favicon.svg`, CSS, JS principal e o chunk do Three.js; todos os recursos do app 200, nenhum 4xx; chunk do Three.js baixado só ao escolher a Esfera; reprodução e Montanhas/Esfera OK; console sem erros; nenhuma requisição enviando o áudio.
+
 ## D6 — Estrutura de pastas plana (2026-11-21)
 
 Começar com `src/audio/`, `src/components/`, `src/hooks/`, `src/styles/`, `src/tests/` e, depois, `src/visualizations/`. Subdividir (`sources/`, `engine/`, `presets/`…) apenas quando houver mais de uma implementação por responsabilidade.

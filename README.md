@@ -24,8 +24,15 @@ Escolha um arquivo de áudio do seu computador e ouça-o com visualizações rea
 
 ## Requisitos
 
-- Node.js 20+ (testado com 24) e npm
+- Node.js **20.19+ ou 22.12+** (exigência do Vite 8; desenvolvido e verificado no CI com **24**) e npm
+- Em desenvolvimento o app abre em `http://localhost:5173/PulseScape/` (mesmo caminho do GitHub Pages)
 - Navegador alvo: Chrome, Edge ou Firefox atuais
+
+## Publicação (GitHub Pages)
+
+Endereço previsto: `https://wigowigo10.github.io/PulseScape/` (`base: '/PulseScape/'` no `vite.config.ts`).
+
+O workflow `.github/workflows/pages.yml` roda em todo push e pull request: `npm ci → typecheck → lint → test → build`. A etapa de publicação **só executa com o repositório público**, em push no `master`; enquanto ele for privado, nada é publicado. Para publicar: tornar o repositório público e, em *Settings → Pages*, escolher **GitHub Actions** como fonte. O site contém apenas o `dist/` (HTML, CSS, JS e o arquivo separado do Three.js) — nem o código-fonte nem áudios.
 
 ## Scripts
 
