@@ -749,19 +749,75 @@ body {
   }
 }
 
+.button {
+  white-space: nowrap;
+}
+
+/* Telas muito estreitas (~320 px): logo e botão do cabeçalho cabem numa linha. */
+@media (max-width: 360px) {
+  .app__title {
+    font-size: 1.05rem;
+  }
+
+  .button--secondary {
+    padding-inline: 0.8rem;
+    font-size: 0.85rem;
+  }
+}
+
+/* Telas de toque: alvos de ~44 px sem engrossar o visual (a trilha continua fina). */
+@media (pointer: coarse) {
+  .slider {
+    --thumb: 20px;
+    height: 2.75rem;
+  }
+
+  .preset-switcher__option,
+  .toast .button,
+  .button--secondary {
+    min-height: 2.75rem;
+  }
+}
+
 @media (max-width: 560px) {
   .app__header {
     grid-template-columns: 1fr auto;
     row-gap: 0.6rem;
   }
 
+  /* Seletor numa linha própria, limitado à largura da tela (min-width: 0 permite
+     encolher o item da grade; sem isso os 6 modos vazavam 23–69 px em 412–320 px). */
   .app__center {
     grid-column: 1 / -1;
     grid-row: 2;
+    justify-self: stretch;
+    min-width: 0;
+    display: flex;
+    justify-content: center;
   }
 
   .app__center:empty {
     display: none;
+  }
+
+  /* Cabe inteiro em ~360 px; abaixo disso rola na horizontal começando pelo 1º modo. */
+  .preset-switcher {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  .preset-switcher::-webkit-scrollbar {
+    display: none;
+  }
+
+  .preset-switcher__option {
+    flex: none;
+    padding: 0.35rem 0.62rem;
+    font-size: 0.8rem;
+    scroll-snap-align: center;
   }
 
   .controls {

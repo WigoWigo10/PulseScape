@@ -14,7 +14,13 @@ const isFileDrag = (event: DragEvent) => event.dataTransfer.types.includes('File
 export default function App() {
   const { engine, snapshot } = useAudioEngine()
   const [presetId, setPresetId] = useState<PresetId>(DEFAULT_PRESET)
+  /** Aviso de visualização (ex.: preset 3D indisponível → Anel). */
+  const [visualNotice, setVisualNotice] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
+  const choosePreset = (id: PresetId) => {
+    setVisualNotice(null)
+    setPresetId(id)
+  }
   // dragenter/dragleave disparam em cada filho; o contador evita piscar o overlay.
   const dragDepth = useRef(0)
 
@@ -54,7 +60,7 @@ export default function App() {
       <header className="app__header">
         <h1 className="app__title">PulseScape</h1>
         <div className="app__center">
-          {hasFile && <PresetSwitcher value={presetId} onChange={setPresetId} />}
+          {hasFile && <PresetSwitcher value={presetId} onChange={choosePreset} />}
         </div>
         <div className="app__actions">
           {hasFile && <FilePicker onFileSelected={loadFile} disabled={!engine} variant="secondary" />}
@@ -63,7 +69,12 @@ export default function App() {
 
       <main className={`stage stage--${snapshot.status}`} aria-label="Área de visualização">
         {engine && (
-          <VisualizerCanvas engine={engine} presetId={presetId} active={snapshot.status === 'playing'} />
+          <VisualizerCanvas
+            engine={engine}
+            presetId={presetId}
+            active={snapshot.status === 'playing'}
+            onNotice={setVisualNotice}
+          />
         )}
 
         {!hasFile && <EmptyState onFileSelected={loadFile} disabled={!engine} />}
@@ -95,10 +106,14 @@ export default function App() {
           </section>
         )}
 
-        {snapshot.notice && (
+        {(snapshot.notice ?? visualNotice) && (
           <div className="toast" role="alert">
-            <span>{snapshot.notice}</span>
-            <button type="button" className="button button--ghost" onClick={() => engine?.dismissNotice()}>
+            <span>{snapshot.notice ?? visualNotice}</span>
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => (snapshot.notice ? engine?.dismissNotice() : setVisualNotice(null))}
+            >
               Fechar
             </button>
           </div>

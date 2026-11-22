@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { FrameReader, type AudioFrame } from '../audio/analysis'
 import type { AudioEngine } from '../audio/AudioEngine'
 import { getPreset, type PresetId } from '../visualizations/registry'
-import type { Visualization } from '../visualizations/types'
+import type { Visualization, VisualizationGL, VisualizationHost } from '../visualizations/types'
 
 const MAX_DPR = 2
 /** Evita saltos após a aba ficar em segundo plano. */
@@ -14,6 +14,8 @@ interface VisualizerCanvasProps {
   presetId: PresetId
   /** true enquanto o áudio toca; ao ficar false o loop roda até a animação assentar. */
   active: boolean
+  /** Aviso para o usuário quando um preset 3D não pode ser exibido (cai para o Anel). */
+  onNotice?: (message: string) => void
 }
 
 interface StageSize {
@@ -35,7 +37,7 @@ function resizeVisualization(visualization: Visualization, size: StageSize) {
  * arrays reutilizados (FrameReader/preset). Trocar de preset substitui apenas a
  * visualização; loop e áudio seguem intactos.
  */
-export function VisualizerCanvas({ engine, presetId, active }: VisualizerCanvasProps) {
+export function VisualizerCanvas({ engine, presetId, active, onNotice }: VisualizerCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvas2dRef = useRef<HTMLCanvasElement>(null)
   const canvasGlRef = useRef<HTMLCanvasElement>(null)
@@ -46,6 +48,16 @@ export function VisualizerCanvas({ engine, presetId, active }: VisualizerCanvasP
   const sizeRef = useRef<StageSize>({ width: 0, height: 0, pixelWidth: 1, pixelHeight: 1 })
   const wakeRef = useRef<() => void>(() => {})
   const redrawRef = useRef<() => void>(() => {})
+  const onNoticeRef = useRef(onNotice)
+  /** Cria o `host` de um preset GL (usado no init e na restauração do contexto). */
+  const hostFactoryRef = useRef<(owner: VisualizationGL) => VisualizationHost>(() => ({
+    requestRedraw: () => {},
+    fail: () => {},
+  }))
+
+  useEffect(() => {
+    onNoticeRef.current = onNotice
+  }, [onNotice])
 
   // Ciclo de vida do preset.
   useEffect(() => {
@@ -54,39 +66,68 @@ export function VisualizerCanvas({ engine, presetId, active }: VisualizerCanvasP
     if (!canvas2d || !canvasGl) return
 
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    let visualization: Visualization = getPreset(presetId).create({ reducedMotion })
+    /** Preset exibido neste efeito: o escolhido, ou o Anel se o 3D falhar. */
+    let current: Visualization | null = null
 
-    if (visualization.kind === 'webgl2') {
+    const releaseGl = (visualization: VisualizationGL) => visualization.dispose(glLostRef.current ? null : glRef.current)
+
+    const show = (visualization: Visualization) => {
+      current = visualization
+      canvas2d.hidden = visualization.kind !== '2d'
+      canvasGl.hidden = visualization.kind !== 'webgl2'
+      resizeVisualization(visualization, sizeRef.current)
+      visualizationRef.current = visualization
+      redrawRef.current()
+    }
+
+    /** Fallback 2D com aviso visível (P0.2/P1.1): o seletor não fica “mentindo” em silêncio. */
+    const fallBackToRing = (message: string) => {
+      console.warn(`[PulseScape] ${message}`)
+      show(getPreset('ring').create({ reducedMotion }))
+      onNoticeRef.current?.(message)
+    }
+
+    // Só o preset ativo neste efeito pode redesenhar ou falhar: callbacks atrasados de
+    // presets já trocados/desmontados são ignorados.
+    const makeHost = (owner: VisualizationGL): VisualizationHost => ({
+      requestRedraw: () => {
+        if (visualizationRef.current === owner) redrawRef.current()
+      },
+      fail: (message) => {
+        if (visualizationRef.current !== owner || current !== owner) return
+        releaseGl(owner)
+        fallBackToRing(message)
+      },
+    })
+    hostFactoryRef.current = makeHost
+
+    const chosen = getPreset(presetId).create({ reducedMotion })
+    if (chosen.kind === '2d') {
+      show(chosen)
+    } else {
       const gl = glRef.current ?? canvasGl.getContext('webgl2', GL_OPTIONS)
-      let ready = false
-      if (gl && !gl.isContextLost()) {
+      if (!gl || gl.isContextLost()) {
+        fallBackToRing(`${chosen.label} precisa de WebGL2, indisponível neste navegador. Exibindo o Anel.`)
+      } else {
         glRef.current = gl
         try {
-          visualization.init(gl)
-          ready = true
+          chosen.init(gl, makeHost(chosen))
+          show(chosen)
         } catch (error) {
           console.error('[PulseScape] Falha ao iniciar preset WebGL:', error)
-          visualization.dispose(gl)
+          releaseGl(chosen)
+          fallBackToRing(`Não foi possível iniciar ${chosen.label} neste navegador. Exibindo o Anel.`)
         }
-      }
-      if (!ready) {
-        // Sem WebGL2 (ou falha de shader): mantém a experiência com o Anel em 2D.
-        console.warn('[PulseScape] WebGL2 indisponível; usando o preset Anel.')
-        visualization = getPreset('ring').create({ reducedMotion })
       }
     }
 
-    canvas2d.hidden = visualization.kind !== '2d'
-    canvasGl.hidden = visualization.kind !== 'webgl2'
-    resizeVisualization(visualization, sizeRef.current)
-    visualizationRef.current = visualization
-    redrawRef.current()
-
-    const current = visualization
     return () => {
-      if (visualizationRef.current === current) visualizationRef.current = null
-      if (current.kind === '2d') current.dispose()
-      else current.dispose(glLostRef.current ? null : glRef.current)
+      const shown = current as Visualization | null
+      if (!shown) return
+      if (visualizationRef.current === shown) visualizationRef.current = null
+      if (shown.kind === '2d') shown.dispose()
+      else releaseGl(shown)
+      current = null
     }
   }, [presetId])
 
@@ -175,7 +216,7 @@ export function VisualizerCanvas({ engine, presetId, active }: VisualizerCanvasP
       const gl = glRef.current
       if (visualization?.kind === 'webgl2' && gl) {
         try {
-          visualization.init(gl)
+          visualization.init(gl, hostFactoryRef.current(visualization))
           resizeVisualization(visualization, sizeRef.current)
           redraw()
         } catch (error) {

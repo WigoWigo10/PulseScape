@@ -2,6 +2,7 @@ import { ANALYSER_MAX_DB, ANALYSER_MIN_DB } from './analysis'
 import { describeMediaError } from './mediaError'
 import { validateAudioFile } from './fileValidation'
 import { measureLoudness, trackGainDb } from './loudness'
+import { ANALYSIS_SAMPLE_RATE, createLatestOnlyRunner, decideTrackAnalysis } from './trackAnalysis'
 
 export type PlayerStatus = 'idle' | 'loading' | 'ready' | 'playing' | 'paused' | 'ended' | 'error'
 
@@ -65,6 +66,14 @@ export class AudioEngine {
   /** Incrementado a cada carga: invalida análises de faixas anteriores ainda em andamento. */
   private loadToken = 0
   private gainDb = 0
+  /** Web Audio falhou na criação: não tentar de novo a cada play. */
+  private graphFailed = false
+  /** Faixa aguardando a duração (`loadedmetadata`) para decidir se será analisada. */
+  private pendingAnalysis: { file: File; token: number } | null = null
+  /** Uma análise por vez; trocas rápidas mantêm só a última na fila (P0.1). */
+  private readonly analysisRunner = createLatestOnlyRunner<{ file: File; token: number }>((job) =>
+    this.analyzeTrack(job.file, job.token),
+  )
 
   constructor() {
     this.audio = new Audio()
@@ -79,6 +88,7 @@ export class AudioEngine {
         duration: this.readDuration(),
         status: this.snapshot.status === 'loading' ? 'ready' : this.snapshot.status,
       })
+      this.startPendingAnalysis()
     })
     on('durationchange', () => this.update({ duration: this.readDuration() }))
     on('timeupdate', () => this.update({ currentTime: this.audio.currentTime }))
@@ -91,7 +101,9 @@ export class AudioEngine {
     on('ended', () => this.update({ status: 'ended', currentTime: this.audio.duration || 0 }))
     on('error', () => {
       if (!this.objectUrl) return
-      this.update({ status: 'error', errorMessage: describeMediaError(this.audio.error?.code) })
+      // Arquivo que não toca não é analisado (a decodificação também falharia).
+      this.pendingAnalysis = null
+      this.update({ status: 'error', errorMessage: describeMediaError(this.audio.error?.code), trackGainDb: 0 })
     })
   }
 
@@ -138,7 +150,26 @@ export class AudioEngine {
     // O ganho da faixa anterior não pode vazar para a nova.
     this.loadToken += 1
     this.setTrackGain(0)
-    void this.analyzeTrack(file, this.loadToken)
+    // A análise só começa no loadedmetadata (precisa da duração); análises de faixas
+    // anteriores que ainda estavam na fila são descartadas sem decodificar.
+    this.analysisRunner.clear()
+    this.pendingAnalysis = { file, token: this.loadToken }
+  }
+
+  /**
+   * Decide, com tamanho e duração, se a faixa atual será analisada (P0.1). Arquivos
+   * grandes, longos ou sem duração conhecida ficam com 0 dB e tocam normalmente.
+   */
+  private startPendingAnalysis(): void {
+    const job = this.pendingAnalysis
+    if (!job || job.token !== this.loadToken || this.disposed) return
+    this.pendingAnalysis = null
+    const decision = decideTrackAnalysis(job.file.size, this.audio.duration)
+    if (!decision.analyze) {
+      this.update({ trackGainDb: 0 })
+      return
+    }
+    this.analysisRunner.run(job)
   }
 
   /**
@@ -147,11 +178,15 @@ export class AudioEngine {
    * O arquivo é lido localmente — nada é enviado pela rede.
    */
   private async analyzeTrack(file: File, token: number): Promise<void> {
+    // Faixa já trocada enquanto esperava na fila: nem lê o arquivo.
+    if (token !== this.loadToken || this.disposed) return
     let gainDb = 0
     try {
       const data = await file.arrayBuffer()
-      // Contexto offline: decodifica sem gesto do usuário e sem saída de áudio.
-      const decoder = new OfflineAudioContext(1, 1, 44100)
+      if (token !== this.loadToken || this.disposed) return
+      // Contexto offline em 8 kHz: decodifica sem gesto do usuário e sem saída de áudio,
+      // com PCM ~5,5× menor que em 44,1 kHz (medição de volume equivalente; D17).
+      const decoder = new OfflineAudioContext(1, 1, ANALYSIS_SAMPLE_RATE)
       const buffer = await decoder.decodeAudioData(data)
       if (token !== this.loadToken || this.disposed) return
       const channels: Float32Array[] = []
@@ -231,8 +266,8 @@ export class AudioEngine {
     if (this.gain && this.context) {
       // Rampa curta evita estalos ao arrastar o controle.
       this.gain.gain.setTargetAtTime(volume, this.context.currentTime, 0.015)
-    } else if (!this.source) {
-      // Sem grafo (ainda não criado ou indisponível): volume direto no elemento.
+    } else {
+      // Sem GainNode (grafo ainda não criado ou falha parcial do Web Audio): volume no elemento.
       this.audio.volume = volume
     }
     this.update({ volume })
@@ -251,7 +286,9 @@ export class AudioEngine {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
-    this.loadToken += 1 // cancela análise de faixa em andamento
+    this.loadToken += 1 // invalida a análise em andamento (o decode termina e é ignorado)
+    this.analysisRunner.clear()
+    this.pendingAnalysis = null
 
     this.events.abort()
     this.listeners.clear()
@@ -279,10 +316,12 @@ export class AudioEngine {
   // ---- Interno -----------------------------------------------------------------------
 
   private ensureGraph(): void {
-    if (this.context) return
+    if (this.context || this.graphFailed) return
+    let context: AudioContext | null = null
+    let source: MediaElementAudioSourceNode | null = null
     try {
-      const context = new AudioContext()
-      const source = context.createMediaElementSource(this.audio)
+      context = new AudioContext()
+      source = context.createMediaElementSource(this.audio)
       const analyser = context.createAnalyser()
       // 4096 → ~11,7 Hz por bin a 48 kHz: resolução suficiente para graves em escala log.
       analyser.fftSize = 4096
@@ -304,7 +343,22 @@ export class AudioEngine {
       this.analyser = analyser
       this.gain = gain
     } catch {
-      // Sem Web Audio: a reprodução segue pelo elemento, mas sem análise.
+      // Falha parcial: tenta uma única vez (repetir a cada play criaria contextos órfãos).
+      this.graphFailed = true
+      if (context && source) {
+        // O <audio> já foi capturado pela fonte: sem ligá-la à saída, o som ficaria mudo.
+        try {
+          source.disconnect()
+          source.connect(context.destination)
+          this.context = context
+          this.source = source
+        } catch {
+          void context.close()
+        }
+      } else if (context) {
+        void context.close()
+      }
+      this.audio.volume = this.snapshot.volume
       this.update({ notice: 'Web Audio indisponível: a reprodução funciona, mas sem visualização.' })
     }
   }

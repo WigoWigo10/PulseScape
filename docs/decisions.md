@@ -164,6 +164,31 @@ Forma de onda em largura total com gatilho, rastro de fósforo (cópias a cada 3
 
 **Medido** (mesmo ambiente): **120 FPS** na Esfera, nas Montanhas e no Anel, alternando entre eles várias vezes; loop para ~1,6 s após pausar; console sem erros.
 
+## D17 — Memória da análise de volume e falha parcial do Web Audio (2026-11-22, P0.1/P0.3)
+
+**Análise de volume (D9) protegida:**
+- Decodifica em **8 kHz** (`ANALYSIS_SAMPLE_RATE`) em vez de 44,1 kHz. Medido nas 3 faixas de teste: P90 RMS difere **≤ 0,1 dB** (ganho idêntico, arredondado a 0,5 dB); PCM **~5,5× menor** (53/59/79 MB → 9,7/10,8/14,3 MB); decodificação igual ou mais rápida.
+- Decide no `loadedmetadata` (duração conhecida, antes de decodificar) via `decideTrackAnalysis`: pula arquivos > **80 MB**, áudios > **15 min** (~58 MB de PCM) ou de duração desconhecida → ganho 0 dB, reprodução normal.
+- `createLatestOnlyRunner`: no máximo **uma** decodificação por vez e só a **última** faixa pedida na fila (`decodeAudioData` não é cancelável); análises de faixas já trocadas não leem nem decodificam o arquivo. Arquivo com erro de reprodução não é analisado.
+- Validado no navegador: cópia −15 dB → +12 dB, decodificada a 8 kHz; WAV de 20 min e de 91 MB → **0 decodificações**, prontos para tocar; 4 trocas rápidas de faixas de 6 min → **máximo 1 decodificação simultânea** e ganho correto da faixa final.
+
+**Falha parcial do Web Audio (`ensureGraph`):** antes, se o `AudioContext` fosse criado e a fonte não, o contexto vazava e **cada play criava outro**; se a fonte fosse criada e algo depois falhasse, o `<audio>` ficava capturado e **mudo**. Agora: tentativa única (`graphFailed`), contexto fechado se a fonte não existir, e fonte ligada direto ao destino se existir; volume passa a valer no elemento sem `GainNode`.
+
+## D18 — Prontidão e falha de presets WebGL assíncronos (2026-11-22, P0.2/P1.1)
+
+`VisualizationGL.init(gl, host)` recebe `VisualizationHost { requestRedraw(), fail(message) }`. A Esfera chama `requestRedraw()` quando o import do Three.js e a cena ficam prontos (sem loop de espera) e `fail()` se o import, a criação do renderer ou a compilação de shader (`renderer.debug.onShaderError`) falharem. O `VisualizerCanvas` só atende o preset **ativo** (callbacks de presets trocados/desmontados são ignorados), troca para o Anel e mostra **aviso visível** (toast no `App`, limpo ao escolher outro modo); o mesmo `host` é usado ao restaurar o contexto. Falha de WebGL2 no início também avisa o usuário (antes, só `console.warn`).
+
+Validado (página recarregada, Three.js não baixado): Esfera escolhida **em pausa** aparece; trocas rápidas Esfera→Anel→Esfera→Montanhas terminam nas Montanhas sem resto da Esfera; download do Three.js bloqueado → Anel + aviso “Não foi possível carregar a Esfera (verifique a conexão). Exibindo o Anel.”, música intacta.
+
+## D19 — Responsividade em celular (2026-11-22, P0.4 parcial)
+
+Auditoria emulada (Chromium com `isMobile`, toque e DPR 2,625) em 412×915, 360×740, 320×640 e 915×412. Problemas encontrados e corrigidos:
+- **Seletor de modos vazava 23–69 px** em telas em pé; centralizado e mais largo que a tela, o 1º modo ficava cortado e inalcançável. Agora o item da grade pode encolher (`min-width: 0`), os botões ficam compactos e, sem espaço, o seletor **rola na horizontal** (com snap) e centraliza o modo ativo ao trocar.
+- **Alvos de toque**: sliders tinham 20 px de altura. Em `pointer: coarse`: sliders com 44 px de área (trilha visual fina, marcador 20 px), botões do seletor/aviso/“Selecionar áudio” ≥ 40–44 px.
+- “Selecionar áudio” quebrava em duas linhas a 320 px: `white-space: nowrap` e logo/botão menores em ≤ 360 px.
+
+Resultado: zero rolagem horizontal e vertical nas quatro telas; todos os controles ≥ 40 px. **Não substitui** o teste no Galaxy A54 (seletor de arquivos do Android, GPU, bloqueio de tela).
+
 ## D6 — Estrutura de pastas plana (2026-11-21)
 
 Começar com `src/audio/`, `src/components/`, `src/hooks/`, `src/styles/`, `src/tests/` e, depois, `src/visualizations/`. Subdividir (`sources/`, `engine/`, `presets/`…) apenas quando houver mais de uma implementação por responsabilidade.

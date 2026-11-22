@@ -25,3 +25,6 @@ dist-ssr
 
 # Artefatos locais de testes no navegador (Playwright MCP)
 .playwright-mcp
+
+# Configuração local de ferramentas de IA/editor
+.serena

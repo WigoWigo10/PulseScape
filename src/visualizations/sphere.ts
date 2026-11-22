@@ -205,15 +205,34 @@ export function createSphere({ bandCount = 64, reducedMotion = false }: PresetOp
     kind: 'webgl2',
     label: 'Esfera',
 
-    init(gl) {
+    init(gl, host) {
       disposeScene() // após restauração de contexto, os recursos antigos não valem mais
       const ticket = ++generation
+      const stale = () => disposed || ticket !== generation
       void import('three')
         .then((three) => {
-          if (disposed || ticket !== generation || gl.isContextLost()) return
-          build(three, gl)
+          if (stale() || gl.isContextLost()) return
+          try {
+            build(three, gl)
+          } catch (error) {
+            console.error('[PulseScape] Falha ao criar a cena da Esfera:', error)
+            disposeScene()
+            host.fail('Não foi possível iniciar a Esfera neste navegador. Exibindo o Anel.')
+            return
+          }
+          // Shader que não compila no driver: o Three.js só registraria no console.
+          if (scene3d) {
+            scene3d.renderer.debug.onShaderError = () => {
+              if (!stale()) host.fail('A placa de vídeo não aceitou o efeito da Esfera. Exibindo o Anel.')
+            }
+          }
+          // Pronto: desenha já, mesmo com a música pausada e o loop parado (P0.2).
+          host.requestRedraw()
         })
-        .catch((error: unknown) => console.error('[PulseScape] Falha ao carregar o Three.js:', error))
+        .catch((error: unknown) => {
+          console.error('[PulseScape] Falha ao carregar o Three.js:', error)
+          if (!stale()) host.fail('Não foi possível carregar a Esfera (verifique a conexão). Exibindo o Anel.')
+        })
     },
 
     resize(w, h, pw, ph) {
